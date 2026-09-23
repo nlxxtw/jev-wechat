@@ -23,7 +23,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "tools platform-tools platforms;android-35 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
 
       - name: Point Gradle at the SDK
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -40,12 +40,17 @@ jobs:
             echo "BUILD_OK"
           else
             echo "::error::Gradle assembleDebug failed"
-            # Surface the real error in public check annotations (no login needed).
-            grep -E "^(FAILURE:|\\* What went wrong:|e: |ERROR:|> Task .* FAILED)" gradle-build.log \
-              | head -80 \
-              | while IFS= read -r line; do echo "::error::$line"; done
-            # Also dump a short tail as notices.
-            tail -n 40 gradle-build.log | while IFS= read -r line; do echo "::notice::$line"; done
+            # Dump the FAILURE block (next ~60 lines) into public annotations.
+            awk '/^FAILURE:/{p=1} p{print; if(++n>=60) exit}' gradle-build.log > fail-excerpt.txt || true
+            # Also catch Kotlin/Java compiler errors.
+            grep -E "^e: |^.*\\.kt:[0-9]+:|^.*Unresolved reference|^.*error:" gradle-build.log \
+              | head -40 >> fail-excerpt.txt || true
+            while IFS= read -r line; do
+              # GitHub annotations choke on some chars; keep it printable.
+              safe=$(printf '%s' "$line" | tr -d '\000-\010\013\014\016-\037')
+              echo "::error::${safe}"
+            done < fail-excerpt.txt
+            cat fail-excerpt.txt
             exit 1
           fi
 
@@ -62,5 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gradle-build-log
-          path: gradle-build.log
+          path: |
+            gradle-build.log
+            fail-excerpt.txt
           if-no-files-found: ignore
