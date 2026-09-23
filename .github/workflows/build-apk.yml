@@ -18,31 +18,39 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
-      # ubuntu-latest runners already ship an Android SDK under $ANDROID_HOME.
-      - name: Accept licenses and install platform 35
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "tools platform-tools platforms;android-35 build-tools;35.0.0"
+
+      - name: Point Gradle at the SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Make gradlew executable (and strip CRLF if any)
         run: |
-          set -e
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "platform-tools"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+          sed -i 's/\r$//' gradlew
+          chmod +x gradlew
+          head -1 gradlew | od -c | head -2
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace --info
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: jev-probe-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failure-logs
+          path: |
+            **/build/reports/**
+            **/*.log
+          if-no-files-found: ignore
