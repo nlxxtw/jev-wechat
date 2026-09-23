@@ -32,10 +32,22 @@ jobs:
         run: |
           sed -i 's/\r$//' gradlew
           chmod +x gradlew
-          head -1 gradlew | od -c | head -2
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace --info
+        run: |
+          set -o pipefail
+          if ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle-build.log; then
+            echo "BUILD_OK"
+          else
+            echo "::error::Gradle assembleDebug failed"
+            # Surface the real error in public check annotations (no login needed).
+            grep -E "^(FAILURE:|\\* What went wrong:|e: |ERROR:|> Task .* FAILED)" gradle-build.log \
+              | head -80 \
+              | while IFS= read -r line; do echo "::error::$line"; done
+            # Also dump a short tail as notices.
+            tail -n 40 gradle-build.log | while IFS= read -r line; do echo "::notice::$line"; done
+            exit 1
+          fi
 
       - name: Upload APK
         if: success()
@@ -45,12 +57,10 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload build logs on failure
-        if: failure()
+      - name: Upload gradle log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-failure-logs
-          path: |
-            **/build/reports/**
-            **/*.log
+          name: gradle-build-log
+          path: gradle-build.log
           if-no-files-found: ignore
