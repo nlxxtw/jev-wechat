@@ -9,9 +9,18 @@ plugins {
 // Release signing: reads a properties file kept OUTSIDE the repo
 // (storeFile / storePassword / keyAlias / keyPassword). Override the path with
 // the JEV_KEYSTORE_PROPS env var. Without it, release builds are unsigned.
+// The Windows default H: path must not be evaluated on Linux CI — Gradle's
+// file() rejects "H:/..." with "Cannot convert URL ... to a file."
 val releaseProps = Properties().apply {
-    val f = file(System.getenv("JEV_KEYSTORE_PROPS") ?: "H:/android/keys/jev-release.properties")
-    if (f.exists()) FileInputStream(f).use { load(it) }
+    val isWindows = System.getProperty("os.name").orEmpty().lowercase().startsWith("windows")
+    val path = System.getenv("JEV_KEYSTORE_PROPS")
+        ?: if (isWindows) "H:/android/keys/jev-release.properties" else null
+    if (path != null) {
+        runCatching {
+            val f = file(path)
+            if (f.exists()) FileInputStream(f).use { load(it) }
+        }
+    }
 }
 
 android {
