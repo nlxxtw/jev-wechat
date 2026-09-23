@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -40,13 +43,10 @@ jobs:
             echo "BUILD_OK"
           else
             echo "::error::Gradle assembleDebug failed"
-            # Dump the FAILURE block (next ~60 lines) into public annotations.
             awk '/^FAILURE:/{p=1} p{print; if(++n>=60) exit}' gradle-build.log > fail-excerpt.txt || true
-            # Also catch Kotlin/Java compiler errors.
             grep -E "^e: |^.*\\.kt:[0-9]+:|^.*Unresolved reference|^.*error:" gradle-build.log \
               | head -40 >> fail-excerpt.txt || true
             while IFS= read -r line; do
-              # GitHub annotations choke on some chars; keep it printable.
               safe=$(printf '%s' "$line" | tr -d '\000-\010\013\014\016-\037')
               echo "::error::${safe}"
             done < fail-excerpt.txt
@@ -54,13 +54,41 @@ jobs:
             exit 1
           fi
 
-      - name: Upload APK
+      - name: Rename APK for release
+        if: success()
+        run: |
+          mkdir -p dist
+          src=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          cp "$src" "dist/jev-probe-v1.3-debug-build${{ github.run_number }}.apk"
+          ls -la dist/
+
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: jev-probe-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: dist/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: success() && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.3-build-${{ github.run_number }}
+          name: Jev 助手 v1.3 (build ${{ github.run_number }})
+          body: |
+            自动构建的 debug APK（含微信文字/图片撤回识别）。
+
+            - Commit: `${{ github.sha }}`
+            - Workflow: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            安装后需自行开启无障碍与悬浮窗权限。发送永远由人手动点。
+          files: dist/*.apk
+          draft: false
+          prerelease: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload gradle log
         if: always()
